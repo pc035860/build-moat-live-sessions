@@ -30,9 +30,12 @@ esac
 
 EXT="${FILE_PATH##*.}"
 
+# Run biome from app/ so it picks up app/biome.json. Without this, biome runs
+# from $CLAUDE_PROJECT_DIR (no biome.json there) and falls back to defaults
+# (e.g. tab indent), silently fighting the project config.
 case "$EXT" in
   js|jsx|ts|tsx|mjs|cjs|json|jsonc)
-    "$BIOME" check --write "$FILE_PATH" 2>/dev/null || true
+    (cd "$CLAUDE_PROJECT_DIR/app" && "$BIOME" check --write "$FILE_PATH") 2>/dev/null || true
     ;;
 esac
 
