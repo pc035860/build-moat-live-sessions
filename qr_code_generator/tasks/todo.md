@@ -7,7 +7,7 @@
 
 ## Phase 1: Foundation
 
-- [ ] **Task 1** — 專案 scaffolding
+- [x] **Task 1** — 專案 scaffolding
   - `app/package.json`（scripts: dev / start / test / typecheck / check / format / db:generate / db:migrate）
   - `app/tsconfig.json`（strict）
   - `app/biome.json`
@@ -15,7 +15,7 @@
   - 安裝：hono / drizzle-orm / zod / @hono/zod-validator / nanoid / qrcode + dev 依賴
   - ✅ Verify: `bun install && bun run typecheck && bun run check`
 
-- [ ] **Task 2** — Drizzle schema + DB client + migrations
+- [x] **Task 2** — Drizzle schema + DB client + migrations
   - `src/db/schema.ts`（urlMappings, scanEvents）
   - **`urlMappings.updatedAt` 用 Drizzle `$onUpdate(() => new Date())`**（或 update query 顯式 set）
   - `src/db/client.ts`（`createDb(path)` factory + `type DB` + 預設 prod `db`）
@@ -24,7 +24,7 @@
   - 跑 `bun run db:generate` 產 migration
   - ✅ Verify: `bun run db:migrate` 成功、schema 有兩張表
 
-- [ ] **Task 3** — Hono `createApp(db)` factory + error handler + config
+- [x] **Task 3** — Hono `createApp(db)` factory + error handler + config
   - `src/config.ts`（BASE_URL / PORT / DB_PATH）
   - `src/lib/errors.ts`（ValidationError / NotFoundError / GoneError + `errorHandler` function）
   - **`src/app.ts`：`export function createApp(db: DB): Hono`**（內部建 cache、組 routes、註冊 onError）
@@ -33,9 +33,9 @@
   - ✅ Verify: `bun run dev` 可起，curl /health → 200
 
 ### ✅ Checkpoint: Foundation
-- [ ] 一條龍可起服務
-- [ ] `bun test` 綠
-- [ ] `typecheck` & `check` 綠
+- [x] 一條龍可起服務
+- [x] `bun test` 綠
+- [x] `typecheck` & `check` 綠
 - [ ] **Human review**
 
 ---
