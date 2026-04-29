@@ -10,12 +10,15 @@ describe("urlMappings schema", () => {
       token: "DUPETOKE",
       originalUrl: "https://example.com/a",
     });
-    expect(async () => {
-      await db.insert(urlMappings).values({
-        token: "DUPETOKE",
-        originalUrl: "https://example.com/b",
-      });
-    }).toThrow();
+    await expect(
+      db
+        .insert(urlMappings)
+        .values({
+          token: "DUPETOKE",
+          originalUrl: "https://example.com/b",
+        })
+        .execute(),
+    ).rejects.toThrow(/UNIQUE/i);
   });
 
   test("createdAt and updatedAt populated by default", async () => {

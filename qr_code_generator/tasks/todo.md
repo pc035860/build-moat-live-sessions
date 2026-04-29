@@ -39,13 +39,12 @@
 - [ ] **Human review**
 
 ### 🟡 Phase 1 Review Follow-ups（review round 1）
-> 來源：Phase 1 五軸審查；I-1 / I-2 已修，I-3 / I-4 待辦。
+> 來源：Phase 1 五軸審查；I-1 / I-2 / I-3 已修，I-4 待辦。
 
-- [ ] **I-3** — `tests/schema.test.ts:13-19` unique constraint test 改用 `await expect(promise).rejects.toThrow()`
-  - 現況：`expect(async () => { await db.insert(...) }).toThrow()` 對 Drizzle thenable builder 不可靠，可能假陽性通過
-  - 修法：直接 `await expect(db.insert(urlMappings).values({...})).rejects.toThrow();`
-  - 驗收：故意把 token 改唯一仍 fail（確認 test 真的會觸發），改回 duplicate 後 pass
-  - 時機：**進 Phase 2 前**處理（避免後續 e2e 也沿用同樣寫法）
+- [x] **I-3** — `tests/schema.test.ts` unique constraint test 改用 `await expect(promise).rejects.toThrow()`
+  - 修法：用 `.execute()` 顯式取真 Promise（Drizzle builder 是 thenable，Bun 的 `rejects` 要 `instanceof Promise` 才認）
+  - 驗收：mutation 把第二筆 token 改成不重複 → test 真的 fail（確認沒有假陽性）；改回 duplicate → pass
+  - **附帶修正**：發現 `.claude/hooks/format-on-edit.sh` 在 `$CLAUDE_PROJECT_DIR` 跑 biome 找不到 `app/biome.json`，fallback 到 default tab；改成 `cd "$CLAUDE_PROJECT_DIR/app"` 後再跑
 
 - [ ] **I-4** — `errorHandler` 在 test 環境壓掉 `console.error` 噪音
   - 現況：`tests/health.test.ts` 的 "unknown error → 500" 觸發 `src/lib/errors.ts:37` 的 `console.error`，stderr 直接吐 stack，CI log 訊雜
