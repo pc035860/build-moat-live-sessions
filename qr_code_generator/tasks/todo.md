@@ -38,6 +38,23 @@
 - [x] `typecheck` & `check` 綠
 - [ ] **Human review**
 
+### 🟡 Phase 1 Review Follow-ups（review round 1）
+> 來源：Phase 1 五軸審查；I-1 / I-2 已修，I-3 / I-4 待辦。
+
+- [ ] **I-3** — `tests/schema.test.ts:13-19` unique constraint test 改用 `await expect(promise).rejects.toThrow()`
+  - 現況：`expect(async () => { await db.insert(...) }).toThrow()` 對 Drizzle thenable builder 不可靠，可能假陽性通過
+  - 修法：直接 `await expect(db.insert(urlMappings).values({...})).rejects.toThrow();`
+  - 驗收：故意把 token 改唯一仍 fail（確認 test 真的會觸發），改回 duplicate 後 pass
+  - 時機：**進 Phase 2 前**處理（避免後續 e2e 也沿用同樣寫法）
+
+- [ ] **I-4** — `errorHandler` 在 test 環境壓掉 `console.error` 噪音
+  - 現況：`tests/health.test.ts` 的 "unknown error → 500" 觸發 `src/lib/errors.ts:37` 的 `console.error`，stderr 直接吐 stack，CI log 訊雜
+  - 修法（兩擇一）：
+    - (a) `errorHandler` 內判斷 `process.env.NODE_ENV !== "test"` 才 log
+    - (b) 在該 test 用 `spyOn(console, "error")` 暫時靜音
+  - 偏好 (a)，因為更通用；若 Phase 2 加 logger abstraction，再一起改成注入式 logger
+  - 時機：**Phase 2 開新 PR 時順手帶**，不阻塞
+
 ---
 
 ## Phase 2: First Vertical Slice (Create + Redirect Happy Path)
