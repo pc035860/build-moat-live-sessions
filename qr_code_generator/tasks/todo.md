@@ -51,12 +51,14 @@
 
 - [ ] **Task 5** — `lib/token.ts` + unit test
   - `generateToken(db, opts?)`：`opts` 含 `maxRetries` 與 `nanoidImpl`（注入點）
-  - 撞 unique → retry（**不 sleep**），預設 3 次失敗 → throw
-  - Unit test 注入 `nanoidImpl` 模擬碰撞
+  - **採 SELECT 偵測**（不採 INSERT catch）
+  - 撞到 → retry（**不 sleep**），預設 3 次失敗 → throw
+  - Unit test 用 `createTestDb()` + 預埋 token 製造碰撞 + 注入 `nanoidImpl`
   - ✅ Verify: `bun test tests/token.test.ts`（≥ 4 case：成功、retry 1 次、retry 耗盡、`maxRetries=1` 立即失敗）
 
 - [ ] **Task 6** — Create + Redirect + Get info（含 cache）+ e2e
-  - `src/lib/cache.ts`：`createCache()` factory，entry shape `{ url: string; expiresAt: string | null }`
+  - `src/lib/cache.ts`：`createCache()` factory，entry shape `{ url: string; expiresAt: string | null }`（**不**存 `is_deleted`）
+  - **Cache 為 dumb storage**：`cache.get` 不做過期判斷；過期判斷在 redirect handler（Task 8）
   - `POST /api/qr/create`：
     - 接受 `expires_at` body、寫 DB、warm cache（含 `expiresAt`）
     - Response `{token, short_url, qr_code_url, original_url, expires_at}`
@@ -66,7 +68,7 @@
     - Response shape：`{token, original_url, short_url, qr_code_url, expires_at, created_at, updated_at}`
   - API JSON 用 snake_case
   - e2e 涵蓋 PROMPT verification curl #1/#2/#3
-  - **e2e 額外**：cache hit 驗證（同 token 連打兩次，DB 只 query 一次）
+  - **e2e 額外**：先 GET warm cache → `db.delete` 砍掉 DB row → 再 GET 仍 302（驗 cache hit，無需 spy）
   - ✅ Verify: PROMPT curl #1/#2/#3 全綠 + cache hit 確認
 
 ### ✅ Checkpoint: First Slice
@@ -119,8 +121,8 @@
   - ✅ Verify: PROMPT curl #9 通過
 
 - [ ] **Task 10** — Scan event + analytics endpoint + e2e
-  - Redirect 成功時 fire-and-forget 寫 `scanEvents`（不 block 302）
-  - 寫 scan 失敗用 try/catch + `console.warn`，不 break redirect
+  - Redirect handler **不 await** scan 寫入：`void db.insert(scanEvents).values({...}).catch((err) => console.warn(...))`
+  - **禁止** `await` scan write（latency 不可包含 DB write）
   - `GET /api/qr/:token/analytics`：
     - 不存在 / deleted → 404
     - **expired → 仍 200**

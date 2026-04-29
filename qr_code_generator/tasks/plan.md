@@ -134,15 +134,15 @@
 
 ### Task 5: `lib/token.ts` — nanoid token + collision retry + unit test
 
-**Description:** `generateToken(db, opts?)` 用 `nanoid(8)` 生成，DB unique constraint 撞了就 retry，預設 3 次後拋 error。`opts` 讓 unit test 可注入 `maxRetries` / `tokenLength` / `nanoidImpl`。
+**Description:** `generateToken(db, opts?)` 用 `nanoid(8)` 生成，**用 SELECT 偵測** DB 是否已存在同 token；撞到就 retry，預設 3 次後拋 error。`opts` 讓 unit test 可注入 `maxRetries` / `nanoidImpl`。
 
 **Acceptance criteria:**
 - [ ] `generateToken(db, opts?)` 回傳 8-char URL-safe token；簽名 `(db: DB, opts?: { maxRetries?: number; nanoidImpl?: () => string }) => Promise<string>`
-- [ ] 撞 unique constraint 會 retry；超過 `opts.maxRetries`（default 3）拋 `Error("Token collision: exhausted retries")`
+- [ ] **採 SELECT 偵測**（`db.select().from(urlMappings).where(eq(urlMappings.token, candidate))` 看是否已存在）；**不**採 INSERT catch unique violation（避免與 Task 6 handler 自己 INSERT 流程打架）
+- [ ] 撞到就 retry；超過 `opts.maxRetries`（default 3）拋 `Error("Token collision: exhausted retries")`
 - [ ] Retry 之間**不引入 sleep / await delay**（避免增加 hot path latency）
-- [ ] 探測 collision 用「先 SELECT 看是否存在」**或**「INSERT 撞 unique error 後 catch」皆可，但 implementation 必須注釋哪一種；e2e 不要求區分
 - [ ] Unit test：注入 `nanoidImpl` 模擬前兩次回固定撞值、第三次回新值 → 確認 retry 次數正確；連續失敗 → 拋 error
-- [ ] Unit test 不需要真的 DB schema，但需要 mock `db` 介面（建議用 `createTestDb()` + 手動先插一筆 token 模擬碰撞，或用 stub object）
+- [ ] Unit test **用 `createTestDb()` 拿真 DB**（避免型別 hack）；製造碰撞方式：先 `db.insert(urlMappings).values({ token: "COLLIDE01", originalUrl: "..." })` 預埋一筆，再呼叫 `generateToken(db, { nanoidImpl: () => "COLLIDE01" })` 必撞 → 第二次注入新值驗 retry
 
 **Verification:**
 - [ ] `bun test tests/token.test.ts` 全綠（≥ 4 個 case：成功、retry 1 次成功、retry 耗盡、注入 maxRetries=1 立即失敗）
@@ -159,7 +159,8 @@
 **Description:** 實作 `lib/cache.ts`（`createCache()` factory，內部 `Map<string, { url: string; expiresAt: string | null }>`），完成 `POST /api/qr/create`、`GET /r/:token`（cache → DB → 302/404）、`GET /api/qr/:token`，並寫 e2e 涵蓋 PROMPT verification curl #1/#2/#3 + cache hit 驗證。
 
 **Acceptance criteria:**
-- [ ] `src/lib/cache.ts`：`createCache()` 回傳物件含 `get(token)`/`set(token, entry)`/`invalidate(token)`/`clear()`；型別 `Cache = ReturnType<typeof createCache>`；entry shape `{ url: string; expiresAt: string | null }`
+- [ ] `src/lib/cache.ts`：`createCache()` 回傳物件含 `get(token)`/`set(token, entry)`/`invalidate(token)`/`clear()`；型別 `Cache = ReturnType<typeof createCache>`；entry shape `{ url: string; expiresAt: string | null }`（**不**存 `is_deleted`，deleted token 永遠走 invalidate path 不再進 cache）
+- [ ] **Cache 為 dumb storage**：`cache.get` 不做過期判斷；過期判斷與 invalidate 寫在 redirect handler（Task 8）
 - [ ] `POST /api/qr/create`：
   - zod 驗 body：`url` 必填、`expires_at` 選填（`z.string().datetime()`）
   - `validateUrl(url)` → `generateToken(db)` → insert（含 `expires_at`）→ warm cache（含 `expiresAt`）
@@ -169,7 +170,7 @@
   - 查 DB；`is_deleted = true` → 404；其他（含 expired）→ 200
   - Response field 明確列出：`{token, original_url, short_url, qr_code_url, expires_at, created_at, updated_at}`（`is_deleted` 不外露，因為 deleted 直接 404）
 - [ ] e2e test 開 in-memory DB + `app.fetch` 直打：覆蓋 PROMPT verification curl #1、#2、#3
-- [ ] **e2e 額外**：同 token 連打兩次 `GET /r/:token`，第二次走 cache（用 `mock.spyOn(db)` 或 cache hit/miss counter 驗 DB query 只發生一次）
+- [ ] **e2e 額外**：先 GET `/r/:token` warm cache → 直接 `db.delete(urlMappings).where(eq(...))` 砍掉 DB row → 再 GET `/r/:token` 仍回 302（證明走 cache，無需 spy Drizzle 鏈）
 - [ ] API JSON 用 snake_case（`short_url`、`qr_code_url`、`original_url`、`expires_at`、`created_at`、`updated_at`）
 
 **Verification:**
@@ -288,8 +289,9 @@ QR image + analytics。涵蓋 PROMPT verification curl #9、#10。
 **Description:** Redirect 成功時寫 `scanEvents`（fire-and-forget，不 block 302 回應）。Analytics route 查 `total_scans` 與 `scans_by_day`。Deleted → 404；**expired 仍可查**（行銷活動結束後仍想看歷史流量）。
 
 **Acceptance criteria:**
-- [ ] Redirect 302 之前（或 in parallel via `queueMicrotask` / 不 await）寫一筆 `scanEvents`，含 user-agent 與 ip
-- [ ] 寫 scan 失敗不 break redirect（用 try/catch + `console.warn`）
+- [ ] Redirect handler **不 await** scan event 寫入；實作為 `void db.insert(scanEvents).values({...}).catch((err) => console.warn("scan write failed", err))`，handler 主流程立即 return 302
+- [ ] Scan event 含 `token`、`scannedAt`、`userAgent`（從 `c.req.header("user-agent")`）、`ipAddress`（從 hono `c.req.header("x-forwarded-for")` 或 `c.env`）
+- [ ] **禁止** `await db.insert(scanEvents)...`（會讓 redirect latency 包含 DB write）
 - [ ] `GET /api/qr/:token/analytics`：
   - 不存在 → 404
   - `is_deleted = true` → 404
@@ -362,6 +364,7 @@ QR image + analytics。涵蓋 PROMPT verification curl #9、#10。
 | **Drizzle `$onUpdate` 在 SQLite 行為不確定** | Med | Task 2 schema 設定後，Task 7 必驗 PATCH 後 `updatedAt` 變動；若 `$onUpdate` 不觸發 raw `update().set()`，改用顯式 `set({ updatedAt: new Date() })` |
 | **e2e 並行執行污染 in-memory DB** | High | `createTestDb()` 永遠回新 instance；route 模組禁止 `import { db }` 直接拿 module singleton（factory injection 強制） |
 | **`expires_at` 接受格式不一致**（ISO vs epoch ms） | Low | zod 強制 `z.string().datetime()`（ISO only）；cache entry 型別固定 `string \| null`；DB 用 Drizzle timestamp mode 統一 Date 物件 |
+| **Prototype scale 假設** | Low | 單機 prototype 不做 connection pool、不啟用 SQLite WAL（`PRAGMA journal_mode=WAL`）；負載超出 demo 範圍時再考慮優化 scan event 寫入鎖競爭 |
 
 ---
 
@@ -381,8 +384,12 @@ QR image + analytics。涵蓋 PROMPT verification curl #9、#10。
 10. **Verification 用詞**：統一寫「PROMPT verification 全部 case」
 11. **`updatedAt` 機制**：Drizzle `$onUpdate` 或顯式 `.set({ updatedAt: new Date() })`（Task 2 + Task 7 e2e 驗）
 12. **Cache hit 過期**：回 410 + invalidate 該 entry（Task 8）
+13. **Token collision 偵測**：採 SELECT 偵測，不採 INSERT catch（Task 5）
+14. **Cache 邏輯位置**：cache 是 dumb storage，過期判斷與 invalidate 寫在 redirect handler（Task 6 / Task 8）
+15. **Scan event 寫入 timing**：`void db.insert(...).catch(...)` 不 await；禁止 `await scan write`（Task 10）
+16. **Prototype scale 假設**：單機 prototype，不做 WAL / pool（Risks 表已記錄）
 
-> 這 12 點 SPEC 與 plan 都已採用，列在這裡僅為實作時對照。
+> 這 16 點 SPEC 與 plan 都已採用，列在這裡僅為實作時對照。
 
 ---
 

@@ -225,6 +225,8 @@ test("POST /api/qr/create returns token", async () => {
 - **No `any`**：必要時用 `unknown` + narrowing。
 - **DB 注入**：`db` 永遠透過 factory 參數傳入；route 模組與 lib（cache 例外，自己擁有狀態）禁止 `import { db } from "../db/client"`。`src/index.ts` 是唯一拿 prod `db` 的地方。
 - **時區**：所有 `expires_at` / `scanned_at` 一律當 **UTC** 處理；DB 存 ISO string；`scans_by_day.date` 用 UTC `YYYY-MM-DD`。
+- **Cache 為 dumb storage**：`cache.get(token)` 只回原值（或 `undefined`），**不做過期判斷、不做 invalidate**；過期判斷與 invalidate 寫在 redirect handler。Cache entry 只存 `{ url, expiresAt }`，**不**存 `is_deleted`（deleted token 永遠走 invalidate path 不再進 cache）。
+- **Token 碰撞偵測**：`generateToken(db)` 採 **SELECT 偵測**（先查 DB 是否已存在），不採「INSERT 撞 unique error catch」，避免與 `POST /api/qr/create` handler 自己 INSERT 流程打架。
 
 ---
 
@@ -246,9 +248,9 @@ test("POST /api/qr/create returns token", async () => {
 - 不啟動真的 port，直接 `app.fetch(new Request(...))` 取得 `Response`。
 - 必須覆蓋 **PROMPT verification 區塊的所有 case** —— 每條對應一個 `test(...)`，命名與原 curl 註解一致。
 - 額外必測 case：
-  - cache hit 驗證（同 token 連打兩次，第二次應走 cache —— 用 spy / counter 驗 `db.select` 只被呼叫一次）
+  - cache hit 驗證（先 GET `/r/:token` warm cache → 直接 `db.delete` 砍掉 DB row → 再 GET 仍回 `302`，證明走 cache）
   - PATCH `expires_at` 從未來改到過去 → 立即 GET `/r/:token` 回 `410`（驗 PATCH invalidate + expired 邏輯交互）
-  - scan 寫入 throw（mock）→ redirect 仍回 302（驗 fire-and-forget 容錯）
+  - scan 寫入 throw（mock `db.insert(scanEvents)` reject）→ redirect 仍回 302（驗 fire-and-forget 容錯）
 
 ### 不做（MVP 範圍外）
 - 覆蓋率門檻
@@ -267,7 +269,7 @@ test("POST /api/qr/create returns token", async () => {
 - Cache miss 才打 DB；DB hit 後 warm cache
 - Cache hit 但 entry 已 `expiresAt` 過 → 回 `410` 並 invalidate 該 entry
 - Redirect (`/r/:token`)：過期或 deleted → `410`；不存在 → `404`
-- Metadata (`GET /api/qr/:token`)、Image、Analytics 對 **expired** 仍可查（回 200 + 含 `expires_at`），對 **deleted** 才回 `404`
+- Metadata (`GET /api/qr/:token`)、Image、Analytics 對 **expired** 仍可查（回 200；其中 metadata 額外含 `expires_at` 欄位），對 **deleted** 才回 `404`
 - API JSON 用 `snake_case` 欄位（PROMPT 合約）
 - `db` 永遠由 `createApp(db)` / `createXxxRoutes(db)` factory 注入
 
@@ -327,6 +329,10 @@ test("POST /api/qr/create returns token", async () => {
 | 10 | Verification 數量用詞 | 統一寫「PROMPT verification 全部 case」，不寫具體數字 |
 | 11 | `updatedAt` 機制 | Drizzle `$onUpdate` 或手動於 update query `set(updatedAt: new Date())`；e2e 必驗 PATCH 後 `updated_at` 變動 |
 | 12 | Cache hit 過期行為 | 回 `410` + invalidate 該 entry |
+| 13 | Token collision 偵測 | **SELECT 偵測**（不採 INSERT catch），避免與 create handler 流程打架 |
+| 14 | Cache 邏輯位置 | Cache 是 **dumb storage**：`cache.get` 只回原值，過期判斷與 invalidate 寫在 redirect handler |
+| 15 | Scan event 寫入 timing | **`void db.insert(...).catch(...)` 不 await**；handler 主流程禁止 await scan 寫入 |
+| 16 | Prototype scale 假設 | 單機 prototype；不做 connection pool / WAL；負載超 demo 範圍再考慮優化 |
 
 ---
 
