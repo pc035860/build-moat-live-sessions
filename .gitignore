@@ -13,3 +13,7 @@ venv/
 .DS_Store
 .vscode/
 .idea/
+
+# Local handover notes
+specs/handover/
+**/specs/handover/
