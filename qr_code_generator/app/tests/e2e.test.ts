@@ -470,6 +470,70 @@ describe("Scan event recording + GET /api/qr/:token/analytics (Task 10)", () => 
     const res = await app.fetch(new Request(`http://localhost/api/qr/${created.token}/analytics`));
     expect(res.status).toBe(404);
   });
+
+  test("expired token analytics still returns 200 (extra)", async () => {
+    // Campaign ended yesterday; owner still wants to see historical traffic.
+    const db = createTestDb();
+    const app = createApp(db);
+    const past = new Date(Date.now() - 1_000).toISOString();
+    const created = (await (
+      await createQr(app, { url: "https://example.com", expires_at: past })
+    ).json()) as CreateResponse;
+
+    const res = await app.fetch(new Request(`http://localhost/api/qr/${created.token}/analytics`));
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as AnalyticsResponse;
+    expect(body.token).toBe(created.token);
+    expect(body.total_scans).toBe(0);
+    expect(body.scans_by_day).toEqual([]);
+  });
+});
+
+describe("Fire-and-forget scan write resilience (Task 10)", () => {
+  test("scan insert throw → GET /r/:token still 302", async () => {
+    const db = createTestDb();
+    const app = createApp(db);
+    const created = (await (
+      await createQr(app, { url: "https://example.com" })
+    ).json()) as CreateResponse;
+
+    // Monkey-patch db.insert *after* the POST has settled, so urlMappings
+    // insert (the create flow) was unaffected. From now on, any insert into
+    // scanEvents rejects — this is the simulated "disk-full / locked DB"
+    // case the fire-and-forget .catch is meant to swallow.
+    const originalInsert = db.insert.bind(db);
+    // biome-ignore lint/suspicious/noExplicitAny: drizzle builder shape
+    (db as any).insert = (table: unknown) => {
+      if (table === scanEvents) {
+        return {
+          values: () => Promise.reject(new Error("simulated scan write failure")),
+        };
+      }
+      // biome-ignore lint/suspicious/noExplicitAny: passthrough
+      return originalInsert(table as any);
+    };
+
+    // Capture (and silence) the expected `console.warn("scan write failed",
+    // ...)`. We assert it fires so the test isn't a false positive — without
+    // this, removing the `.catch(...)` clause would still pass on the 302
+    // assertion alone.
+    const originalWarn = console.warn;
+    const warnings: unknown[][] = [];
+    console.warn = (...args: unknown[]) => {
+      warnings.push(args);
+    };
+    try {
+      const res = await app.fetch(new Request(`http://localhost/r/${created.token}`));
+      expect(res.status).toBe(302);
+      expect(res.headers.get("location")).toBe("https://example.com/");
+      // Yield so the rejected Promise's .catch microtask runs before we exit.
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      expect(warnings).toHaveLength(1);
+      expect(warnings[0]?.[0]).toBe("scan write failed");
+    } finally {
+      console.warn = originalWarn;
+    }
+  });
 });
 
 describe("GET /api/qr/:token/image (Task 9)", () => {
@@ -508,6 +572,27 @@ describe("GET /api/qr/:token/image (Task 9)", () => {
 
     const res = await app.fetch(new Request(`http://localhost/api/qr/${created.token}/image`));
     expect(res.status).toBe(404);
+  });
+
+  test("expired token image still returns 200 + PNG (extra)", async () => {
+    // Owner wants to download the QR image after a campaign ended — image
+    // route MUST NOT 410 like redirect does.
+    const db = createTestDb();
+    const app = createApp(db);
+    const past = new Date(Date.now() - 1_000).toISOString();
+    const created = (await (
+      await createQr(app, { url: "https://example.com", expires_at: past })
+    ).json()) as CreateResponse;
+
+    const res = await app.fetch(new Request(`http://localhost/api/qr/${created.token}/image`));
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toBe("image/png");
+    const body = new Uint8Array(await res.arrayBuffer());
+    // PNG magic bytes 89 50 4E 47
+    expect(body[0]).toBe(0x89);
+    expect(body[1]).toBe(0x50);
+    expect(body[2]).toBe(0x4e);
+    expect(body[3]).toBe(0x47);
   });
 });
 

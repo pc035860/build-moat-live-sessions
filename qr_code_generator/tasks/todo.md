@@ -172,10 +172,10 @@
   - ✅ Verify: PROMPT curl #10 通過
 
 ### ✅ Checkpoint: Aux
-- [ ] PROMPT verification 全部 case 通過（含 image content-type）
-- [ ] analytics 計數正確、`scans_by_day` 用 UTC `YYYY-MM-DD`
-- [ ] redirect 不被 scan 寫入 block
-- [ ] expired token 對 metadata / image / analytics 全部 200
+- [x] PROMPT verification 全部 case 通過（含 image content-type）
+- [x] analytics 計數正確、`scans_by_day` 用 UTC `YYYY-MM-DD`
+- [x] redirect 不被 scan 寫入 block
+- [x] expired token 對 metadata / image / analytics 全部 200
 - [ ] **Human review**
 
 ---

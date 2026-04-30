@@ -4,7 +4,7 @@
   "path": "specs/phases-3-4",
   "workflowy_task_id": null,
   "last_updated": "2026-04-30",
-  "session": 4,
+  "session": 5,
   "status": "in_progress",
   "runner": {
     "mode": "subagent",
@@ -16,7 +16,7 @@
     "B_phase3_test": "passing",
     "C_phase3_review": "passing",
     "D_phase4_build": "passing",
-    "E_phase4_test": "pending",
+    "E_phase4_test": "passing",
     "F_phase4_review": "pending"
   },
   "notes": [
@@ -27,5 +27,5 @@
     "每個 checklist item 必須在不同 session 跑（不可在同一 session 處理兩個 item）",
     "autonomous session：禁用 AskUserQuestion，遇不確定採 MVP 自行決定並記錄"
   ],
-  "next_session_goal": "E_phase4_test"
+  "next_session_goal": "F_phase4_review"
 }
