@@ -122,6 +122,28 @@
 - [x] cache invalidation 在 PATCH/DELETE 都生效
 - [ ] **Human review**
 
+### 🟡 Phase 3 Review Follow-ups（review session C）
+> 來源：Phase 3 五軸審查（session-003）。沒有 Critical 問題；以下為 Important / Suggestion，建議在 Phase 4 開工前處理前三項。
+
+**值得 Phase 4 開工前帶**
+
+- [ ] **C-1 / A-1 / P-1** — `routes/qr.ts:125-138` PATCH 改用 Drizzle `.returning()` 取代 UPDATE+SELECT readback
+  - 理由：兩段 round trip 中間理論上可被 DELETE 插入；`.returning()` 一次完成且原子。
+  - 同時消除 [R-2] 註解需求。
+- [ ] **R-1** — 抽 `requireLiveRow(db, token)` helper（Phase 4 image / analytics 會再 +2 次 404-by-token 分支）
+  - 目前 `routes/qr.ts:93-97 / 109-113 / 143-147` 三處重複「select + 404 if !row || isDeleted」。
+- [ ] **C-2** — 移除 `tests/e2e.test.ts:402-430` cache-hit-expired test 中 dead `created` 變數
+  - 純 noise，無 assertion 引用，刪掉測試更聚焦。
+
+**留 backlog（不阻擋 Phase 4 / 5）**
+
+- [ ] **A-2** — 若 Phase 4 重用 expiry 判斷，再抽 `lib/expiry.ts`（提供 `isExpiredIso` / `isExpiredDate`）。現在不抽，避免投機抽象。
+- [ ] **A-3** — DELETE response shape 是否要對齊 PATCH 回完整 metadata（含 `is_deleted: true`）。Optional。
+- [ ] **R-3** — `expiringCreated` 變數命名換成 `createdWithPastExpiry`（Minor）。
+- [ ] **S-1** — PATCH 422 vs 404 順序洩露 token-existence side-channel。Prototype 可接受，未來若加防枚舉再處理。
+- [ ] **S-2** — DELETE / PATCH 無 auth，token 持有者即可改/刪。SPEC 沒要求；prototype 範圍內擱置。
+- [ ] **P-2** — In-memory cache 無上限（`Map`），長跑會 OOM；production 前需 bounded LRU + TTL。
+
 ---
 
 ## Phase 4: Auxiliary Endpoints
