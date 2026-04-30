@@ -91,11 +91,7 @@ export function createQrRoutes(db: DB, cache: Cache) {
 
   routes.get("/:token", async (c) => {
     const token = c.req.param("token");
-    const rows = await db.select().from(urlMappings).where(eq(urlMappings.token, token)).limit(1);
-    const row = rows[0];
-    if (!row || row.isDeleted) {
-      throw new NotFoundError("Token not found");
-    }
+    const row = await requireLiveRow(db, token);
     return c.json(toMetadataResponse(row));
   });
 
@@ -107,11 +103,7 @@ export function createQrRoutes(db: DB, cache: Cache) {
       throw new ValidationError("Must provide at least one of url, expires_at");
     }
 
-    const rows = await db.select().from(urlMappings).where(eq(urlMappings.token, token)).limit(1);
-    const row = rows[0];
-    if (!row || row.isDeleted) {
-      throw new NotFoundError("Token not found");
-    }
+    await requireLiveRow(db, token);
 
     // Build the partial update. `updatedAt` is bumped via Drizzle's
     // `$onUpdate` on the schema, so we don't set it explicitly.
@@ -123,17 +115,17 @@ export function createQrRoutes(db: DB, cache: Cache) {
       patch.expiresAt = expires_at === null ? null : new Date(expires_at);
     }
 
-    await db.update(urlMappings).set(patch).where(eq(urlMappings.token, token));
+    // `.returning()` makes UPDATE+readback atomic — no window for a DELETE
+    // to slip between writing and reading our own row.
+    const [updated] = await db
+      .update(urlMappings)
+      .set(patch)
+      .where(eq(urlMappings.token, token))
+      .returning();
     cache.invalidate(token);
 
-    const refreshed = await db
-      .select()
-      .from(urlMappings)
-      .where(eq(urlMappings.token, token))
-      .limit(1);
-    const updated = refreshed[0];
     if (!updated) {
-      // Should never happen — we just updated the row in the same connection.
+      // Row was deleted between the precondition select and the UPDATE.
       throw new NotFoundError("Token not found");
     }
     return c.json(toMetadataResponse(updated));
@@ -141,13 +133,9 @@ export function createQrRoutes(db: DB, cache: Cache) {
 
   routes.get("/:token/analytics", async (c) => {
     const token = c.req.param("token");
-    const rows = await db.select().from(urlMappings).where(eq(urlMappings.token, token)).limit(1);
-    const row = rows[0];
     // Deleted → 404. Expired → still 200 (campaign analytics still useful
     // after the link itself stops resolving).
-    if (!row || row.isDeleted) {
-      throw new NotFoundError("Token not found");
-    }
+    await requireLiveRow(db, token);
 
     const events = await db
       .select({ scannedAt: scanEvents.scannedAt })
@@ -175,13 +163,9 @@ export function createQrRoutes(db: DB, cache: Cache) {
 
   routes.get("/:token/image", async (c) => {
     const token = c.req.param("token");
-    const rows = await db.select().from(urlMappings).where(eq(urlMappings.token, token)).limit(1);
-    const row = rows[0];
     // Deleted → 404. Expired → still 200 + PNG (users may want to view their
     // own past QR codes after a campaign ends).
-    if (!row || row.isDeleted) {
-      throw new NotFoundError("Token not found");
-    }
+    await requireLiveRow(db, token);
     const png = await qrPng(shortUrl(token));
     // Use the standard Response constructor — Hono's `c.body()` typings reject
     // Node `Buffer` (Buffer<ArrayBufferLike> ≠ Uint8Array<ArrayBuffer>), but
@@ -194,17 +178,30 @@ export function createQrRoutes(db: DB, cache: Cache) {
 
   routes.delete("/:token", async (c) => {
     const token = c.req.param("token");
-    const rows = await db.select().from(urlMappings).where(eq(urlMappings.token, token)).limit(1);
-    const row = rows[0];
-    if (!row || row.isDeleted) {
-      throw new NotFoundError("Token not found");
-    }
+    await requireLiveRow(db, token);
     await db.update(urlMappings).set({ isDeleted: true }).where(eq(urlMappings.token, token));
     cache.invalidate(token);
     return c.json({ token, deleted: true });
   });
 
   return routes;
+}
+
+/**
+ * Look up a token that's expected to be alive (exists and not soft-deleted).
+ * Throws NotFoundError on miss or tombstone, so handlers can stay one-liners.
+ *
+ * Not used for the redirect path — that one needs a 410 branch for deleted /
+ * expired rows, which has different semantics from "404 for everything that
+ * isn't usable here".
+ */
+async function requireLiveRow(db: DB, token: string): Promise<typeof urlMappings.$inferSelect> {
+  const rows = await db.select().from(urlMappings).where(eq(urlMappings.token, token)).limit(1);
+  const row = rows[0];
+  if (!row || row.isDeleted) {
+    throw new NotFoundError("Token not found");
+  }
+  return row;
 }
 
 function toMetadataResponse(row: typeof urlMappings.$inferSelect) {

@@ -660,15 +660,9 @@ describe("Redirect expiration (Task 8)", () => {
   test("cache hit but entry expiresAt is past → 410 + cache invalidated", async () => {
     const db = createTestDb();
     const app = createApp(db);
-    const created = (await (
-      await createQr(app, { url: "https://example.com" })
-    ).json()) as CreateResponse;
 
-    // Warm cache with a future expiry, then mutate DB directly to past — cache
-    // still holds the future expiry until a redirect re-evaluates. To exercise
-    // the "cache hit but expired" branch we set the cache via POST with a past
-    // expiry (POST writes through to cache) — the redirect must read cache and
-    // still return 410.
+    // POST with a past expiry writes through to the cache, so the redirect
+    // hits the "cache hit but expired" branch on first read.
     const past = new Date(Date.now() - 1_000).toISOString();
     const expiringCreated = (await (
       await createQr(app, { url: "https://expired.example.com", expires_at: past })
@@ -682,8 +676,5 @@ describe("Redirect expiration (Task 8)", () => {
     await db.delete(urlMappings).where(eq(urlMappings.token, expiringCreated.token));
     const second = await app.fetch(new Request(`http://localhost/r/${expiringCreated.token}`));
     expect(second.status).toBe(404);
-
-    // Touch `created` to silence unused warnings if linter complains.
-    expect(created.token).toBeTruthy();
   });
 });

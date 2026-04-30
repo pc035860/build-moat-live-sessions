@@ -127,13 +127,16 @@
 
 **值得 Phase 4 開工前帶**
 
-- [ ] **C-1 / A-1 / P-1** — `routes/qr.ts:125-138` PATCH 改用 Drizzle `.returning()` 取代 UPDATE+SELECT readback
+- [x] **C-1 / A-1 / P-1** — `routes/qr.ts:125-138` PATCH 改用 Drizzle `.returning()` 取代 UPDATE+SELECT readback
   - 理由：兩段 round trip 中間理論上可被 DELETE 插入；`.returning()` 一次完成且原子。
   - 同時消除 [R-2] 註解需求。
-- [ ] **R-1** — 抽 `requireLiveRow(db, token)` helper（Phase 4 image / analytics 會再 +2 次 404-by-token 分支）
+  - **Done**：`.returning()` 後保留「row was deleted between precondition and UPDATE」的 race 註解；grep 確認本來就沒有 `[R-2]` 字串可清。
+- [x] **R-1** — 抽 `requireLiveRow(db, token)` helper（Phase 4 image / analytics 會再 +2 次 404-by-token 分支）
   - 目前 `routes/qr.ts:93-97 / 109-113 / 143-147` 三處重複「select + 404 if !row || isDeleted」。
-- [ ] **C-2** — 移除 `tests/e2e.test.ts:402-430` cache-hit-expired test 中 dead `created` 變數
+  - **Done**：與 F-R-1 同一份 patch；qr.ts 5 處替換完成（GET / PATCH 前置 / analytics / image / DELETE），redirect.ts 因為 410 語意不同保留原樣。
+- [x] **C-2** — 移除 `tests/e2e.test.ts:402-430` cache-hit-expired test 中 dead `created` 變數
   - 純 noise，無 assertion 引用，刪掉測試更聚焦。
+  - **Done**：原行號其實是 `631-659`（todo 寫錯）；dead `created` 與 self-justifying assertion 一併刪除，順手把多餘的 prelude 註解收斂。
 
 **留 backlog（不阻擋 Phase 4 / 5）**
 
@@ -193,9 +196,10 @@
   - Fix：`xff?.split(",")[0]?.trim() || null`，與 F-S-1 truncate 同 PR 處理。
   - **Done**：與 F-S-1 同一 patch（`recordScan` 內取 first hop）。
 
-- [ ] **F-R-1** — 抽 `requireLiveRow(db, token)` helper（5 處重複）
+- [x] **F-R-1** — 抽 `requireLiveRow(db, token)` helper（5 處重複）
   - `qr.ts:93-97 / 110-113 / 144-148 / 178-183 / 197-201` 都是「select + 404 if !row || isDeleted」。Phase 4 把重複次數從 3 增到 5。
   - 升級 Phase 3 review 的 R-1（同一份 follow-up，Phase 4 之後價值更高）。
+  - **Done**：與 R-1 同一份 patch，helper 放在 `routes/qr.ts` 檔尾；redirect.ts 不納入。
 
 **🟡 Production 前處理（不阻擋 Phase 5）**
 
