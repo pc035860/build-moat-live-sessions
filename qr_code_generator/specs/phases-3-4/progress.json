@@ -4,8 +4,8 @@
   "path": "specs/phases-3-4",
   "workflowy_task_id": null,
   "last_updated": "2026-04-30",
-  "session": 5,
-  "status": "in_progress",
+  "session": 6,
+  "status": "completed",
   "runner": {
     "mode": "subagent",
     "session_id": null,
@@ -17,7 +17,7 @@
     "C_phase3_review": "passing",
     "D_phase4_build": "passing",
     "E_phase4_test": "passing",
-    "F_phase4_review": "pending"
+    "F_phase4_review": "passing"
   },
   "notes": [
     "Phase 1 (Foundation) & Phase 2 (First Vertical Slice) 已完成並 commit",
@@ -27,5 +27,5 @@
     "每個 checklist item 必須在不同 session 跑（不可在同一 session 處理兩個 item）",
     "autonomous session：禁用 AskUserQuestion，遇不確定採 MVP 自行決定並記錄"
   ],
-  "next_session_goal": "F_phase4_review"
+  "next_session_goal": "all_done"
 }

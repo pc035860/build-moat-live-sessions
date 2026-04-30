@@ -178,6 +178,43 @@
 - [x] expired token 對 metadata / image / analytics 全部 200
 - [ ] **Human review**
 
+### 🟡 Phase 4 Review Follow-ups（review session F）
+> 來源：Phase 4 五軸審查（session-006）。一個 Critical（DB bloat via large header），其餘 Important / Suggestion。建議 Phase 5 開工前處理 F-S-1 + F-R-1 + F-P-3 三項。
+
+**🔴 必處理（Phase 5 開工前）**
+
+- [ ] **F-S-1 / Critical** — `redirect.ts:72-74` `userAgent` / `ipAddress` 無長度限制
+  - 攻擊者可送 1MB `User-Agent` / `X-Forwarded-For`，每次 redirect 灌進 DB → DB bloat / write lock 拖垮 redirect。
+  - Fix（MVP）：在 `recordScan` 內 truncate（`userAgent.slice(0, 500)` / `ipAddress.slice(0, 200)`），或 schema 加 length check。
+
+- [ ] **F-P-3** — `redirect.ts:73` X-Forwarded-For 應 split 取第一個 IP
+  - 目前整個 `client, proxy1, proxy2` 字串落 DB，語意（IP 應為單值）+ 效能（過長字串）雙重問題。
+  - Fix：`xff?.split(",")[0]?.trim() || null`，與 F-S-1 truncate 同 PR 處理。
+
+- [ ] **F-R-1** — 抽 `requireLiveRow(db, token)` helper（5 處重複）
+  - `qr.ts:93-97 / 110-113 / 144-148 / 178-183 / 197-201` 都是「select + 404 if !row || isDeleted」。Phase 4 把重複次數從 3 增到 5。
+  - 升級 Phase 3 review 的 R-1（同一份 follow-up，Phase 4 之後價值更高）。
+
+**🟡 Production 前處理（不阻擋 Phase 5）**
+
+- [ ] **F-P-1** — `qr.ts:152-156` analytics SELECT 無 `LIMIT`，應 push down `GROUP BY date(scanned_at/1000, 'unixepoch')` 到 SQL。單一 token 累積大量 event 時記憶體會爆。
+- [ ] **F-P-2** — `qr.ts:185` image route 每 request 重 encode PNG。加 `Cache-Control: public, max-age=86400, immutable`，或 in-memory PNG LRU。
+- [ ] **F-S-2** — X-Forwarded-For 信任問題；上線需 trust-proxy 中介層。
+- [ ] **F-S-3** — analytics / image 無 auth，token 持有者即可看；SPEC 未要求，prototype 接受。
+
+**🔵 Backlog / Suggestion**
+
+- [ ] **F-C-1** — `qr.ts:167` `localeCompare` → 直接字串比較（cosmetic）。
+- [ ] **F-C-2** — image route 加 `Cache-Control` header（與 F-P-2 重疊）。
+- [ ] **F-R-2** — `recordScan(db, c, token)` 不該吃 Hono `Context`，改成 `recordScan(db, { token, userAgent, ipAddress })`。
+- [ ] **F-R-3** — `lib/qr.ts:8` 註解「off-thread」改成「returns a Promise so the call doesn't block」。
+- [ ] **F-A-1** — analytics in-memory bucketing（已在 code 註解 documented，與 F-P-1 同源）。
+- [ ] **F-A-2** — image 用 `new Response()` 而非 `c.body()`；可改 `qrPng` 回 `Uint8Array` 對齊風格。
+- [ ] **F-A-3** — `recordScan` 上移到 `lib/scan.ts`（目前 scope 小不抽）。
+- [ ] **F-A-4** — `lib/qr.ts` 無 unit test；thin wrapper，價值低，可略。
+- [ ] **F-S-4** — `qrPng(text)` docstring 加「caller responsible for length validation」。
+- [ ] **F-P-4** — `redirect.ts:62-66` 註解補一句「bun-sqlite is synchronous; fire-and-forget here = error containment, not async I/O」。
+
 ---
 
 ## Phase 5: Polish
