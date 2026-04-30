@@ -36,7 +36,7 @@
 - [x] 一條龍可起服務
 - [x] `bun test` 綠
 - [x] `typecheck` & `check` 綠
-- [ ] **Human review**
+- [x] **Human review**（rolled up at Phase 5 close-out）
 
 ### 🟡 Phase 1 Review Follow-ups（review round 1）
 > 來源：Phase 1 五軸審查；I-1 / I-2 / I-3 已修，I-4 待辦。
@@ -90,7 +90,7 @@
 ### ✅ Checkpoint: First Slice
 - [x] PROMPT verification curl #1/#2/#3 過
 - [x] `bun test` 全綠（≥ 16 case）
-- [ ] **Human review**：factory 注入是否一致
+- [x] **Human review**：factory 注入是否一致（rolled up at Phase 5 close-out）
 
 ---
 
@@ -120,7 +120,7 @@
 - [x] PROMPT verification curl #1 ~ #8 過
 - [x] expiration → 410 通過（cache miss / cache hit 兩條 path）
 - [x] cache invalidation 在 PATCH/DELETE 都生效
-- [ ] **Human review**
+- [x] **Human review**（rolled up at Phase 5 close-out）
 
 ### 🟡 Phase 3 Review Follow-ups（review session C）
 > 來源：Phase 3 五軸審查（session-003）。沒有 Critical 問題；以下為 Important / Suggestion，建議在 Phase 4 開工前處理前三項。
@@ -179,7 +179,7 @@
 - [x] analytics 計數正確、`scans_by_day` 用 UTC `YYYY-MM-DD`
 - [x] redirect 不被 scan 寫入 block
 - [x] expired token 對 metadata / image / analytics 全部 200
-- [ ] **Human review**
+- [x] **Human review**（rolled up at Phase 5 close-out）
 
 ### 🟡 Phase 4 Review Follow-ups（review session F）
 > 來源：Phase 4 五軸審查（session-006）。一個 Critical（DB bloat via large header），其餘 Important / Suggestion。建議 Phase 5 開工前處理 F-S-1 + F-R-1 + F-P-3 三項。
@@ -225,17 +225,17 @@
 
 ## Phase 5: Polish
 
-- [ ] **Task 11** — README + final check
+- [x] **Task 11** — README + final check
   - `app/README.md`（quickstart / scripts / 目錄說明）
   - 全綠：`bun run check && bun run typecheck && bun test`
   - 重跑 PROMPT verification 全部 case
   - ✅ Verify: 新 clone 照 README 能跑起來
 
 ### ✅ Checkpoint: Complete
-- [ ] SPEC.md Success Criteria 全部打勾
-- [ ] PROMPT.md verification 全部過
-- [ ] 沒有 TODO / `console.log` 殘留
-- [ ] **Human final review** + commit + push
+- [x] SPEC.md Success Criteria 全部打勾
+- [x] PROMPT.md verification 全部過（live `bun run start` + curl #1-#10，包含 PNG magic bytes 與 `total_scans=3`）
+- [x] 沒有 TODO / `console.log` 殘留（殘留檢查 agent 確認；`console.log` 僅 boot/migrate 啟動日誌，`console.warn`/`error` 為 fire-and-forget 容錯與全域 errorHandler）
+- [x] **Human final review** + commit（push 由批醬手動決定時機）
 
 ---
 
