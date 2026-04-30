@@ -296,6 +296,32 @@ describe("PATCH /api/qr/:token (Task 7)", () => {
     const res = await patchQr(app, created.token, { url: "javascript:alert(1)" });
     expect(res.status).toBe(422);
   });
+
+  test("PATCH bumps updated_at past created_at (verifies $onUpdate)", async () => {
+    const db = createTestDb();
+    const app = createApp(db);
+    const created = (await (
+      await createQr(app, { url: "https://example.com" })
+    ).json()) as CreateResponse;
+
+    const before = (await (
+      await app.fetch(new Request(`http://localhost/api/qr/${created.token}`))
+    ).json()) as InfoResponse;
+    // created_at uses sqlite `unixepoch()*1000` (whole-second granularity);
+    // updated_at uses Drizzle `$onUpdate(() => new Date())` (millisecond
+    // granularity). To make `updated_at > created_at` meaningful even in the
+    // pathological case where the insert happened on a whole second, sleep
+    // past the next second boundary before issuing PATCH.
+    await Bun.sleep(1100);
+
+    const patched = (await (
+      await patchQr(app, created.token, { url: "https://renamed.example.com" })
+    ).json()) as InfoResponse;
+    expect(patched.created_at).toBe(before.created_at);
+    expect(new Date(patched.updated_at).getTime()).toBeGreaterThan(
+      new Date(patched.created_at).getTime(),
+    );
+  });
 });
 
 describe("DELETE /api/qr/:token (Task 8)", () => {

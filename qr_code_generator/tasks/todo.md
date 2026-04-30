@@ -117,9 +117,9 @@
   - ✅ Verify: PROMPT curl #6/#7/#8 + 兩個 expiration case 全綠
 
 ### ✅ Checkpoint: Mutations
-- [ ] PROMPT verification curl #1 ~ #8 過
-- [ ] expiration → 410 通過（cache miss / cache hit 兩條 path）
-- [ ] cache invalidation 在 PATCH/DELETE 都生效
+- [x] PROMPT verification curl #1 ~ #8 過
+- [x] expiration → 410 通過（cache miss / cache hit 兩條 path）
+- [x] cache invalidation 在 PATCH/DELETE 都生效
 - [ ] **Human review**
 
 ---
