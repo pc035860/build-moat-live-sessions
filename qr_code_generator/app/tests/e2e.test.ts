@@ -426,6 +426,35 @@ describe("Scan event recording + GET /api/qr/:token/analytics (Task 10)", () => 
     expect(events[0]?.ipAddress).toBe("203.0.113.7");
   });
 
+  test("truncates oversized UA and stores only first XFF hop (security)", async () => {
+    // Attacker sends 10KB User-Agent + multi-hop X-Forwarded-For.
+    // Without truncation, every redirect bloats scan_events; without XFF
+    // splitting, downstream IP analysis sees `client, proxy1, proxy2` as
+    // one opaque string.
+    const db = createTestDb();
+    const app = createApp(db);
+    const created = (await (
+      await createQr(app, { url: "https://example.com" })
+    ).json()) as CreateResponse;
+
+    const giantUa = "M".repeat(10_000);
+    await app.fetch(
+      new Request(`http://localhost/r/${created.token}`, {
+        headers: {
+          "user-agent": giantUa,
+          "x-forwarded-for": "203.0.113.7, 10.0.0.1, 192.168.1.1",
+        },
+      }),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    const events = await db.select().from(scanEvents).where(eq(scanEvents.token, created.token));
+    expect(events).toHaveLength(1);
+    expect(events[0]?.userAgent?.length).toBe(512);
+    expect(events[0]?.userAgent).toBe(giantUa.slice(0, 512));
+    expect(events[0]?.ipAddress).toBe("203.0.113.7");
+  });
+
   test("scans_by_day buckets by UTC date in ascending order", async () => {
     const db = createTestDb();
     const app = createApp(db);

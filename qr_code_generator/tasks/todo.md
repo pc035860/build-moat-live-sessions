@@ -183,13 +183,15 @@
 
 **🔴 必處理（Phase 5 開工前）**
 
-- [ ] **F-S-1 / Critical** — `redirect.ts:72-74` `userAgent` / `ipAddress` 無長度限制
+- [x] **F-S-1 / Critical** — `redirect.ts:72-74` `userAgent` / `ipAddress` 無長度限制
   - 攻擊者可送 1MB `User-Agent` / `X-Forwarded-For`，每次 redirect 灌進 DB → DB bloat / write lock 拖垮 redirect。
   - Fix（MVP）：在 `recordScan` 內 truncate（`userAgent.slice(0, 500)` / `ipAddress.slice(0, 200)`），或 schema 加 length check。
+  - **Done**：UA cap 512、IP cap 64；e2e `tests/e2e.test.ts` 加「10KB UA + multi-hop XFF」case。
 
-- [ ] **F-P-3** — `redirect.ts:73` X-Forwarded-For 應 split 取第一個 IP
+- [x] **F-P-3** — `redirect.ts:73` X-Forwarded-For 應 split 取第一個 IP
   - 目前整個 `client, proxy1, proxy2` 字串落 DB，語意（IP 應為單值）+ 效能（過長字串）雙重問題。
   - Fix：`xff?.split(",")[0]?.trim() || null`，與 F-S-1 truncate 同 PR 處理。
+  - **Done**：與 F-S-1 同一 patch（`recordScan` 內取 first hop）。
 
 - [ ] **F-R-1** — 抽 `requireLiveRow(db, token)` helper（5 處重複）
   - `qr.ts:93-97 / 110-113 / 144-148 / 178-183 / 197-201` 都是「select + 404 if !row || isDeleted」。Phase 4 把重複次數從 3 增到 5。

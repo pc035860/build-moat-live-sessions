@@ -59,19 +59,30 @@ export function createRedirectRoutes(db: DB, cache: Cache) {
   return routes;
 }
 
+// Hard caps on attacker-controlled headers so a 1MB User-Agent or a
+// 100-IP X-Forwarded-For chain can't bloat the scan_events table.
+const MAX_USER_AGENT_LENGTH = 512;
+const MAX_IP_LENGTH = 64;
+
 /**
  * Fire-and-forget scan event write. We MUST NOT await — the 302 latency
  * cannot include an analytics insert. `.catch` swallows write errors so a
  * disk-full / locked DB cannot bubble out and 500 the redirect.
+ *
+ * Header hygiene: User-Agent is truncated; X-Forwarded-For is split on `,`
+ * and only the first hop (the original client IP per RFC 7239) is kept and
+ * truncated. Trust of XFF itself is the deployment's job (reverse proxy).
  */
 function recordScan(db: DB, c: Context, token: string): void {
+  const rawUa = c.req.header("user-agent");
+  const userAgent = rawUa !== undefined ? rawUa.slice(0, MAX_USER_AGENT_LENGTH) : null;
+
+  const firstHop = c.req.header("x-forwarded-for")?.split(",")[0]?.trim();
+  const ipAddress = firstHop ? firstHop.slice(0, MAX_IP_LENGTH) : null;
+
   void db
     .insert(scanEvents)
-    .values({
-      token,
-      userAgent: c.req.header("user-agent") ?? null,
-      ipAddress: c.req.header("x-forwarded-for") ?? null,
-    })
+    .values({ token, userAgent, ipAddress })
     .catch((err) => console.warn("scan write failed", err));
 }
 
