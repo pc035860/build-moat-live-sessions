@@ -6,13 +6,22 @@ import { BASE_URL } from "../config";
 import type { DB } from "../db/client";
 import { urlMappings } from "../db/schema";
 import type { Cache } from "../lib/cache";
-import { NotFoundError } from "../lib/errors";
+import { NotFoundError, ValidationError } from "../lib/errors";
 import { generateToken } from "../lib/token";
 import { validateUrl } from "../lib/url";
 
 const createSchema = z.object({
   url: z.string().min(1),
   expires_at: z.string().datetime().optional(),
+});
+
+// PATCH must update at least one field. zod's default error path returns 400,
+// but our SPEC wants 422 for "shape parsed but semantically empty" — so we
+// keep the schema permissive and enforce non-empty in the handler, throwing
+// ValidationError (→ 422 via errorHandler).
+const patchSchema = z.object({
+  url: z.string().min(1).optional(),
+  expires_at: z.string().datetime().nullable().optional(),
 });
 
 function shortUrl(token: string) {
@@ -86,16 +95,72 @@ export function createQrRoutes(db: DB, cache: Cache) {
     if (!row || row.isDeleted) {
       throw new NotFoundError("Token not found");
     }
-    return c.json({
-      token: row.token,
-      original_url: row.originalUrl,
-      short_url: shortUrl(row.token),
-      qr_code_url: qrCodeUrl(row.token),
-      expires_at: row.expiresAt ? row.expiresAt.toISOString() : null,
-      created_at: row.createdAt.toISOString(),
-      updated_at: row.updatedAt.toISOString(),
-    });
+    return c.json(toMetadataResponse(row));
+  });
+
+  routes.patch("/:token", zValidator("json", patchSchema), async (c) => {
+    const token = c.req.param("token");
+    const { url, expires_at } = c.req.valid("json");
+
+    if (url === undefined && expires_at === undefined) {
+      throw new ValidationError("Must provide at least one of url, expires_at");
+    }
+
+    const rows = await db.select().from(urlMappings).where(eq(urlMappings.token, token)).limit(1);
+    const row = rows[0];
+    if (!row || row.isDeleted) {
+      throw new NotFoundError("Token not found");
+    }
+
+    // Build the partial update. `updatedAt` is bumped via Drizzle's
+    // `$onUpdate` on the schema, so we don't set it explicitly.
+    const patch: Partial<typeof urlMappings.$inferInsert> = {};
+    if (url !== undefined) {
+      patch.originalUrl = validateUrl(url);
+    }
+    if (expires_at !== undefined) {
+      patch.expiresAt = expires_at === null ? null : new Date(expires_at);
+    }
+
+    await db.update(urlMappings).set(patch).where(eq(urlMappings.token, token));
+    cache.invalidate(token);
+
+    const refreshed = await db
+      .select()
+      .from(urlMappings)
+      .where(eq(urlMappings.token, token))
+      .limit(1);
+    const updated = refreshed[0];
+    if (!updated) {
+      // Should never happen — we just updated the row in the same connection.
+      throw new NotFoundError("Token not found");
+    }
+    return c.json(toMetadataResponse(updated));
+  });
+
+  routes.delete("/:token", async (c) => {
+    const token = c.req.param("token");
+    const rows = await db.select().from(urlMappings).where(eq(urlMappings.token, token)).limit(1);
+    const row = rows[0];
+    if (!row || row.isDeleted) {
+      throw new NotFoundError("Token not found");
+    }
+    await db.update(urlMappings).set({ isDeleted: true }).where(eq(urlMappings.token, token));
+    cache.invalidate(token);
+    return c.json({ token, deleted: true });
   });
 
   return routes;
+}
+
+function toMetadataResponse(row: typeof urlMappings.$inferSelect) {
+  return {
+    token: row.token,
+    original_url: row.originalUrl,
+    short_url: shortUrl(row.token),
+    qr_code_url: qrCodeUrl(row.token),
+    expires_at: row.expiresAt ? row.expiresAt.toISOString() : null,
+    created_at: row.createdAt.toISOString(),
+    updated_at: row.updatedAt.toISOString(),
+  };
 }

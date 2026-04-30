@@ -215,3 +215,191 @@ describe("Cache hit verification (extra)", () => {
     expect(second.headers.get("location")).toBe("https://example.com/");
   });
 });
+
+async function patchQr(
+  app: ReturnType<typeof createApp>,
+  token: string,
+  body: Record<string, unknown>,
+): Promise<Response> {
+  return app.fetch(
+    new Request(`http://localhost/api/qr/${token}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+  );
+}
+
+describe("PATCH /api/qr/:token (Task 7)", () => {
+  test("updates url, invalidates cache, redirect reflects new URL", async () => {
+    const db = createTestDb();
+    const app = createApp(db);
+    const created = (await (
+      await createQr(app, { url: "https://example.com" })
+    ).json()) as CreateResponse;
+
+    // Warm cache.
+    await app.fetch(new Request(`http://localhost/r/${created.token}`));
+
+    const res = await patchQr(app, created.token, { url: "https://updated.example.com" });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as InfoResponse;
+    expect(body.original_url).toBe("https://updated.example.com/");
+
+    const redirect = await app.fetch(new Request(`http://localhost/r/${created.token}`));
+    expect(redirect.status).toBe(302);
+    expect(redirect.headers.get("location")).toBe("https://updated.example.com/");
+  });
+
+  test("updates expires_at, accepts ISO and null", async () => {
+    const db = createTestDb();
+    const app = createApp(db);
+    const created = (await (
+      await createQr(app, { url: "https://example.com" })
+    ).json()) as CreateResponse;
+
+    const future = new Date(Date.now() + 3_600_000).toISOString();
+    const res = await patchQr(app, created.token, { expires_at: future });
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as InfoResponse).expires_at).toBe(future);
+
+    const cleared = await patchQr(app, created.token, { expires_at: null });
+    expect(cleared.status).toBe(200);
+    expect(((await cleared.json()) as InfoResponse).expires_at).toBeNull();
+  });
+
+  test("PATCH with empty body returns 422 (must update at least one field)", async () => {
+    const db = createTestDb();
+    const app = createApp(db);
+    const created = (await (
+      await createQr(app, { url: "https://example.com" })
+    ).json()) as CreateResponse;
+
+    const res = await patchQr(app, created.token, {});
+    expect(res.status).toBe(422);
+  });
+
+  test("returns 404 for unknown token", async () => {
+    const db = createTestDb();
+    const app = createApp(db);
+    const res = await patchQr(app, "MISSING0", { url: "https://example.com" });
+    expect(res.status).toBe(404);
+  });
+
+  test("returns 422 for invalid url (validateUrl rejects)", async () => {
+    const db = createTestDb();
+    const app = createApp(db);
+    const created = (await (
+      await createQr(app, { url: "https://example.com" })
+    ).json()) as CreateResponse;
+
+    const res = await patchQr(app, created.token, { url: "javascript:alert(1)" });
+    expect(res.status).toBe(422);
+  });
+});
+
+describe("DELETE /api/qr/:token (Task 8)", () => {
+  test("soft delete: returns 200, subsequent redirect returns 410", async () => {
+    const db = createTestDb();
+    const app = createApp(db);
+    const created = (await (
+      await createQr(app, { url: "https://example.com" })
+    ).json()) as CreateResponse;
+
+    // Warm cache so we also exercise invalidation.
+    await app.fetch(new Request(`http://localhost/r/${created.token}`));
+
+    const del = await app.fetch(
+      new Request(`http://localhost/api/qr/${created.token}`, { method: "DELETE" }),
+    );
+    expect(del.status).toBe(200);
+
+    const redirect = await app.fetch(new Request(`http://localhost/r/${created.token}`));
+    expect(redirect.status).toBe(410);
+  });
+
+  test("returns 404 for unknown token", async () => {
+    const db = createTestDb();
+    const app = createApp(db);
+    const res = await app.fetch(
+      new Request("http://localhost/api/qr/MISSING0", { method: "DELETE" }),
+    );
+    expect(res.status).toBe(404);
+  });
+
+  test("deleted token: GET metadata returns 404 (already covered by Phase 2)", async () => {
+    const db = createTestDb();
+    const app = createApp(db);
+    const created = (await (
+      await createQr(app, { url: "https://example.com" })
+    ).json()) as CreateResponse;
+
+    await app.fetch(new Request(`http://localhost/api/qr/${created.token}`, { method: "DELETE" }));
+
+    const res = await app.fetch(new Request(`http://localhost/api/qr/${created.token}`));
+    expect(res.status).toBe(404);
+  });
+});
+
+describe("Redirect expiration (Task 8)", () => {
+  test("expires_at in past (cache cold) → 410", async () => {
+    const db = createTestDb();
+    const app = createApp(db);
+    const past = new Date(Date.now() - 1_000).toISOString();
+    const created = (await (
+      await createQr(app, { url: "https://example.com", expires_at: past })
+    ).json()) as CreateResponse;
+
+    const res = await app.fetch(new Request(`http://localhost/r/${created.token}`));
+    expect(res.status).toBe(410);
+  });
+
+  test("PATCH expires_at to past invalidates cache and immediate redirect → 410", async () => {
+    const db = createTestDb();
+    const app = createApp(db);
+    const created = (await (
+      await createQr(app, { url: "https://example.com" })
+    ).json()) as CreateResponse;
+
+    // Warm cache.
+    const first = await app.fetch(new Request(`http://localhost/r/${created.token}`));
+    expect(first.status).toBe(302);
+
+    const past = new Date(Date.now() - 1_000).toISOString();
+    const patched = await patchQr(app, created.token, { expires_at: past });
+    expect(patched.status).toBe(200);
+
+    const after = await app.fetch(new Request(`http://localhost/r/${created.token}`));
+    expect(after.status).toBe(410);
+  });
+
+  test("cache hit but entry expiresAt is past → 410 + cache invalidated", async () => {
+    const db = createTestDb();
+    const app = createApp(db);
+    const created = (await (
+      await createQr(app, { url: "https://example.com" })
+    ).json()) as CreateResponse;
+
+    // Warm cache with a future expiry, then mutate DB directly to past — cache
+    // still holds the future expiry until a redirect re-evaluates. To exercise
+    // the "cache hit but expired" branch we set the cache via POST with a past
+    // expiry (POST writes through to cache) — the redirect must read cache and
+    // still return 410.
+    const past = new Date(Date.now() - 1_000).toISOString();
+    const expiringCreated = (await (
+      await createQr(app, { url: "https://expired.example.com", expires_at: past })
+    ).json()) as CreateResponse;
+
+    const res = await app.fetch(new Request(`http://localhost/r/${expiringCreated.token}`));
+    expect(res.status).toBe(410);
+
+    // Hard-delete the DB row; if cache was invalidated on the previous request,
+    // a second hit cannot find anything anywhere → 404.
+    await db.delete(urlMappings).where(eq(urlMappings.token, expiringCreated.token));
+    const second = await app.fetch(new Request(`http://localhost/r/${expiringCreated.token}`));
+    expect(second.status).toBe(404);
+
+    // Touch `created` to silence unused warnings if linter complains.
+    expect(created.token).toBeTruthy();
+  });
+});

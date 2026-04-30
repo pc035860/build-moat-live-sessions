@@ -1,0 +1,31 @@
+{
+  "project": "qr_code_generator",
+  "spec": "phases-3-4",
+  "path": "specs/phases-3-4",
+  "workflowy_task_id": null,
+  "last_updated": "2026-04-30",
+  "session": 1,
+  "status": "in_progress",
+  "runner": {
+    "mode": "subagent",
+    "session_id": null,
+    "last_runner": "claude-opus-4-7"
+  },
+  "checklist": {
+    "A_phase3_build": "passing",
+    "B_phase3_test": "pending",
+    "C_phase3_review": "pending",
+    "D_phase4_build": "pending",
+    "E_phase4_test": "pending",
+    "F_phase4_review": "pending"
+  },
+  "notes": [
+    "Phase 1 (Foundation) & Phase 2 (First Vertical Slice) 已完成並 commit",
+    "本 spec 範圍 = tasks/plan.md Phase 3 (Task 7 + 8) + Phase 4 (Task 9 + 10)，共 6 個 session 連跑",
+    "順序固定：A_phase3_build → B_phase3_test → C_phase3_review → D_phase4_build → E_phase4_test → F_phase4_review",
+    "對應 skill：build = agent-skills:build / test = agent-skills:test / review = agent-skills:review",
+    "每個 checklist item 必須在不同 session 跑（不可在同一 session 處理兩個 item）",
+    "autonomous session：禁用 AskUserQuestion，遇不確定採 MVP 自行決定並記錄"
+  ],
+  "next_session_goal": "B_phase3_test"
+}

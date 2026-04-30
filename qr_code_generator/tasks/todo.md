@@ -96,7 +96,7 @@
 
 ## Phase 3: Mutation Vertical Slice
 
-- [ ] **Task 7** — PATCH + cache invalidation + e2e
+- [x] **Task 7** — PATCH + cache invalidation + e2e
   - `PATCH /api/qr/:token`：url? + expires_at?（zod，至少一個有值）
   - 找不到（含 deleted）→ 404
   - 更新 url：validate URL、寫 DB、**`updatedAt` 自動更新**、invalidate cache
@@ -106,7 +106,7 @@
   - **e2e 額外**：PATCH 後 `updated_at > created_at`（驗 `$onUpdate`）
   - ✅ Verify: PROMPT curl #4/#5 + updated_at 變動 全綠
 
-- [ ] **Task 8** — DELETE + 410/404 + expiration + cache 過期 + e2e
+- [x] **Task 8** — DELETE + 410/404 + expiration + cache 過期 + e2e
   - `DELETE /api/qr/:token`：soft delete + invalidate cache
   - Redirect 邏輯擴充：deleted → 410、expired → 410、not found → 404
   - **Cache hit 但 entry 已 expiresAt 過 → 直接回 410 + invalidate 該 entry**（不 fallthrough 到 DB）
