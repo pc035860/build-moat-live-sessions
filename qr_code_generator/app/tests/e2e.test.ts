@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { eq } from "drizzle-orm";
 import { createApp } from "../src/app";
 import { BASE_URL } from "../src/config";
-import { urlMappings } from "../src/db/schema";
+import { scanEvents, urlMappings } from "../src/db/schema";
 import { createTestDb } from "../src/db/test-db";
 
 interface CreateResponse {
@@ -363,6 +363,150 @@ describe("DELETE /api/qr/:token (Task 8)", () => {
     await app.fetch(new Request(`http://localhost/api/qr/${created.token}`, { method: "DELETE" }));
 
     const res = await app.fetch(new Request(`http://localhost/api/qr/${created.token}`));
+    expect(res.status).toBe(404);
+  });
+});
+
+interface AnalyticsResponse {
+  token: string;
+  total_scans: number;
+  scans_by_day: Array<{ date: string; count: number }>;
+}
+
+describe("Scan event recording + GET /api/qr/:token/analytics (Task 10)", () => {
+  test("redirects record scan events; analytics counts them", async () => {
+    const db = createTestDb();
+    const app = createApp(db);
+    const created = (await (
+      await createQr(app, { url: "https://example.com" })
+    ).json()) as CreateResponse;
+
+    for (let i = 0; i < 3; i += 1) {
+      const r = await app.fetch(new Request(`http://localhost/r/${created.token}`));
+      expect(r.status).toBe(302);
+    }
+
+    // Fire-and-forget scan writes are not awaited by the redirect handler.
+    // Yield once so any pending microtask/IO from the unawaited insert can
+    // settle before we read back. Microtask queue drain.
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    const res = await app.fetch(new Request(`http://localhost/api/qr/${created.token}/analytics`));
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as AnalyticsResponse;
+    expect(body.token).toBe(created.token);
+    expect(body.total_scans).toBe(3);
+    // All three scans land on the same UTC day → exactly one bucket.
+    expect(body.scans_by_day).toHaveLength(1);
+    expect(body.scans_by_day[0]?.count).toBe(3);
+    // YYYY-MM-DD shape
+    expect(body.scans_by_day[0]?.date).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+  });
+
+  test("captures user-agent and ip from headers", async () => {
+    const db = createTestDb();
+    const app = createApp(db);
+    const created = (await (
+      await createQr(app, { url: "https://example.com" })
+    ).json()) as CreateResponse;
+
+    await app.fetch(
+      new Request(`http://localhost/r/${created.token}`, {
+        headers: {
+          "user-agent": "Mozilla/5.0 (Test Agent)",
+          "x-forwarded-for": "203.0.113.7",
+        },
+      }),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    const events = await db.select().from(scanEvents).where(eq(scanEvents.token, created.token));
+    expect(events).toHaveLength(1);
+    expect(events[0]?.userAgent).toBe("Mozilla/5.0 (Test Agent)");
+    expect(events[0]?.ipAddress).toBe("203.0.113.7");
+  });
+
+  test("scans_by_day buckets by UTC date in ascending order", async () => {
+    const db = createTestDb();
+    const app = createApp(db);
+    const created = (await (
+      await createQr(app, { url: "https://example.com" })
+    ).json()) as CreateResponse;
+
+    // Pre-seed events on three different UTC days so we don't depend on wall
+    // clock. Mix the insert order to prove the route sorts ascending.
+    await db.insert(scanEvents).values([
+      { token: created.token, scannedAt: new Date("2026-04-15T12:00:00Z") },
+      { token: created.token, scannedAt: new Date("2026-04-13T05:00:00Z") },
+      { token: created.token, scannedAt: new Date("2026-04-15T23:30:00Z") },
+      { token: created.token, scannedAt: new Date("2026-04-14T00:00:00Z") },
+    ]);
+
+    const res = await app.fetch(new Request(`http://localhost/api/qr/${created.token}/analytics`));
+    const body = (await res.json()) as AnalyticsResponse;
+    expect(body.total_scans).toBe(4);
+    expect(body.scans_by_day).toEqual([
+      { date: "2026-04-13", count: 1 },
+      { date: "2026-04-14", count: 1 },
+      { date: "2026-04-15", count: 2 },
+    ]);
+  });
+
+  test("returns 404 for unknown token", async () => {
+    const db = createTestDb();
+    const app = createApp(db);
+    const res = await app.fetch(new Request("http://localhost/api/qr/MISSING0/analytics"));
+    expect(res.status).toBe(404);
+  });
+
+  test("returns 404 for soft-deleted token", async () => {
+    const db = createTestDb();
+    const app = createApp(db);
+    const created = (await (
+      await createQr(app, { url: "https://example.com" })
+    ).json()) as CreateResponse;
+    await app.fetch(new Request(`http://localhost/api/qr/${created.token}`, { method: "DELETE" }));
+
+    const res = await app.fetch(new Request(`http://localhost/api/qr/${created.token}/analytics`));
+    expect(res.status).toBe(404);
+  });
+});
+
+describe("GET /api/qr/:token/image (Task 9)", () => {
+  test("returns 200 with image/png content-type for live token", async () => {
+    const db = createTestDb();
+    const app = createApp(db);
+    const created = (await (
+      await createQr(app, { url: "https://example.com" })
+    ).json()) as CreateResponse;
+
+    const res = await app.fetch(new Request(`http://localhost/api/qr/${created.token}/image`));
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toBe("image/png");
+    const body = new Uint8Array(await res.arrayBuffer());
+    // PNG magic bytes 89 50 4E 47
+    expect(body[0]).toBe(0x89);
+    expect(body[1]).toBe(0x50);
+    expect(body[2]).toBe(0x4e);
+    expect(body[3]).toBe(0x47);
+  });
+
+  test("returns 404 for unknown token", async () => {
+    const db = createTestDb();
+    const app = createApp(db);
+    const res = await app.fetch(new Request("http://localhost/api/qr/MISSING0/image"));
+    expect(res.status).toBe(404);
+  });
+
+  test("returns 404 for soft-deleted token", async () => {
+    const db = createTestDb();
+    const app = createApp(db);
+    const created = (await (
+      await createQr(app, { url: "https://example.com" })
+    ).json()) as CreateResponse;
+    await app.fetch(new Request(`http://localhost/api/qr/${created.token}`, { method: "DELETE" }));
+
+    const res = await app.fetch(new Request(`http://localhost/api/qr/${created.token}/image`));
     expect(res.status).toBe(404);
   });
 });

@@ -4,9 +4,10 @@ import { Hono } from "hono";
 import { z } from "zod";
 import { BASE_URL } from "../config";
 import type { DB } from "../db/client";
-import { urlMappings } from "../db/schema";
+import { scanEvents, urlMappings } from "../db/schema";
 import type { Cache } from "../lib/cache";
 import { NotFoundError, ValidationError } from "../lib/errors";
+import { qrPng } from "../lib/qr";
 import { generateToken } from "../lib/token";
 import { validateUrl } from "../lib/url";
 
@@ -136,6 +137,59 @@ export function createQrRoutes(db: DB, cache: Cache) {
       throw new NotFoundError("Token not found");
     }
     return c.json(toMetadataResponse(updated));
+  });
+
+  routes.get("/:token/analytics", async (c) => {
+    const token = c.req.param("token");
+    const rows = await db.select().from(urlMappings).where(eq(urlMappings.token, token)).limit(1);
+    const row = rows[0];
+    // Deleted → 404. Expired → still 200 (campaign analytics still useful
+    // after the link itself stops resolving).
+    if (!row || row.isDeleted) {
+      throw new NotFoundError("Token not found");
+    }
+
+    const events = await db
+      .select({ scannedAt: scanEvents.scannedAt })
+      .from(scanEvents)
+      .where(eq(scanEvents.token, token));
+
+    // Bucket in-memory by UTC YYYY-MM-DD. At prototype scale this beats
+    // pushing a SQLite-specific `strftime(... 'unixepoch')` into the query;
+    // we revisit if event volume per token grows beyond a single page.
+    const dayCounts = new Map<string, number>();
+    for (const ev of events) {
+      const day = ev.scannedAt.toISOString().slice(0, 10);
+      dayCounts.set(day, (dayCounts.get(day) ?? 0) + 1);
+    }
+    const scans_by_day = [...dayCounts.entries()]
+      .map(([date, count]) => ({ date, count }))
+      .sort((a, b) => a.date.localeCompare(b.date));
+
+    return c.json({
+      token,
+      total_scans: events.length,
+      scans_by_day,
+    });
+  });
+
+  routes.get("/:token/image", async (c) => {
+    const token = c.req.param("token");
+    const rows = await db.select().from(urlMappings).where(eq(urlMappings.token, token)).limit(1);
+    const row = rows[0];
+    // Deleted → 404. Expired → still 200 + PNG (users may want to view their
+    // own past QR codes after a campaign ends).
+    if (!row || row.isDeleted) {
+      throw new NotFoundError("Token not found");
+    }
+    const png = await qrPng(shortUrl(token));
+    // Use the standard Response constructor — Hono's `c.body()` typings reject
+    // Node `Buffer` (Buffer<ArrayBufferLike> ≠ Uint8Array<ArrayBuffer>), but
+    // the underlying runtime accepts BodyInit including Buffer just fine.
+    return new Response(png, {
+      status: 200,
+      headers: { "Content-Type": "image/png" },
+    });
   });
 
   routes.delete("/:token", async (c) => {

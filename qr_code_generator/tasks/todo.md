@@ -148,7 +148,7 @@
 
 ## Phase 4: Auxiliary Endpoints
 
-- [ ] **Task 9** — `lib/qr.ts` + image endpoint + e2e
+- [x] **Task 9** — `lib/qr.ts` + image endpoint + e2e
   - `qrPng(text)` → Buffer
   - `GET /api/qr/:token/image`：
     - 不存在 → 404
@@ -158,7 +158,7 @@
   - **e2e 額外**：expired token GET image 仍 200
   - ✅ Verify: PROMPT curl #9 通過
 
-- [ ] **Task 10** — Scan event + analytics endpoint + e2e
+- [x] **Task 10** — Scan event + analytics endpoint + e2e
   - Redirect handler **不 await** scan 寫入：`void db.insert(scanEvents).values({...}).catch((err) => console.warn(...))`
   - **禁止** `await` scan write（latency 不可包含 DB write）
   - `GET /api/qr/:token/analytics`：

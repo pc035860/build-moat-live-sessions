@@ -1,7 +1,7 @@
 import { eq } from "drizzle-orm";
-import { Hono } from "hono";
+import { type Context, Hono } from "hono";
 import type { DB } from "../db/client";
-import { urlMappings } from "../db/schema";
+import { scanEvents, urlMappings } from "../db/schema";
 import type { Cache } from "../lib/cache";
 import { GoneError, NotFoundError } from "../lib/errors";
 
@@ -30,6 +30,7 @@ export function createRedirectRoutes(db: DB, cache: Cache) {
         cache.invalidate(token);
         throw new GoneError("Token expired");
       }
+      recordScan(db, c, token);
       return c.redirect(cached.url, 302);
     }
 
@@ -51,10 +52,27 @@ export function createRedirectRoutes(db: DB, cache: Cache) {
       url: row.originalUrl,
       expiresAt: row.expiresAt ? row.expiresAt.toISOString() : null,
     });
+    recordScan(db, c, token);
     return c.redirect(row.originalUrl, 302);
   });
 
   return routes;
+}
+
+/**
+ * Fire-and-forget scan event write. We MUST NOT await — the 302 latency
+ * cannot include an analytics insert. `.catch` swallows write errors so a
+ * disk-full / locked DB cannot bubble out and 500 the redirect.
+ */
+function recordScan(db: DB, c: Context, token: string): void {
+  void db
+    .insert(scanEvents)
+    .values({
+      token,
+      userAgent: c.req.header("user-agent") ?? null,
+      ipAddress: c.req.header("x-forwarded-for") ?? null,
+    })
+    .catch((err) => console.warn("scan write failed", err));
 }
 
 function isExpired(expiresAtIso: string | null): boolean {
