@@ -46,7 +46,7 @@
   - 驗收：mutation 把第二筆 token 改成不重複 → test 真的 fail（確認沒有假陽性）；改回 duplicate → pass
   - **附帶修正**：發現 `.claude/hooks/format-on-edit.sh` 在 `$CLAUDE_PROJECT_DIR` 跑 biome 找不到 `app/biome.json`，fallback 到 default tab；改成 `cd "$CLAUDE_PROJECT_DIR/app"` 後再跑
 
-- [ ] **I-4** — `errorHandler` 在 test 環境壓掉 `console.error` 噪音
+- [x] **I-4** — `errorHandler` 在 test 環境壓掉 `console.error` 噪音
   - 現況：`tests/health.test.ts` 的 "unknown error → 500" 觸發 `src/lib/errors.ts:37` 的 `console.error`，stderr 直接吐 stack，CI log 訊雜
   - 修法（兩擇一）：
     - (a) `errorHandler` 內判斷 `process.env.NODE_ENV !== "test"` 才 log
@@ -58,21 +58,21 @@
 
 ## Phase 2: First Vertical Slice (Create + Redirect Happy Path)
 
-- [ ] **Task 4** — `lib/url.ts` + unit test
+- [x] **Task 4** — `lib/url.ts` + unit test
   - `normalizeUrl(input)`：scheme/host 小寫、移除預設 port、percent-encoding 大寫
   - `validateUrl(input)`：長度、scheme、blocklist
   - 不做 http→https upgrade
   - 補 case：IPv6 host、userinfo URL 行為明確
   - ✅ Verify: `bun test tests/url.test.ts`（≥ 10 case）
 
-- [ ] **Task 5** — `lib/token.ts` + unit test
+- [x] **Task 5** — `lib/token.ts` + unit test
   - `generateToken(db, opts?)`：`opts` 含 `maxRetries` 與 `nanoidImpl`（注入點）
   - **採 SELECT 偵測**（不採 INSERT catch）
   - 撞到 → retry（**不 sleep**），預設 3 次失敗 → throw
   - Unit test 用 `createTestDb()` + 預埋 token 製造碰撞 + 注入 `nanoidImpl`
   - ✅ Verify: `bun test tests/token.test.ts`（≥ 4 case：成功、retry 1 次、retry 耗盡、`maxRetries=1` 立即失敗）
 
-- [ ] **Task 6** — Create + Redirect + Get info（含 cache）+ e2e
+- [x] **Task 6** — Create + Redirect + Get info（含 cache）+ e2e
   - `src/lib/cache.ts`：`createCache()` factory，entry shape `{ url: string; expiresAt: string | null }`（**不**存 `is_deleted`）
   - **Cache 為 dumb storage**：`cache.get` 不做過期判斷；過期判斷在 redirect handler（Task 8）
   - `POST /api/qr/create`：
@@ -88,8 +88,8 @@
   - ✅ Verify: PROMPT curl #1/#2/#3 全綠 + cache hit 確認
 
 ### ✅ Checkpoint: First Slice
-- [ ] PROMPT verification curl #1/#2/#3 過
-- [ ] `bun test` 全綠（≥ 16 case）
+- [x] PROMPT verification curl #1/#2/#3 過
+- [x] `bun test` 全綠（≥ 16 case）
 - [ ] **Human review**：factory 注入是否一致
 
 ---
