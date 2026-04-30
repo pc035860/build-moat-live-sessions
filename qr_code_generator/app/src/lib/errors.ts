@@ -34,6 +34,8 @@ export function errorHandler(err: Error, c: Context): Response {
   if (isAppError(err)) {
     return c.json({ error: err.message }, err.status);
   }
-  console.error("Unhandled error:", err);
+  if (process.env.NODE_ENV !== "test") {
+    console.error("Unhandled error:", err);
+  }
   return c.json({ error: "Internal Server Error" }, 500);
 }
