@@ -68,6 +68,27 @@ describe("PROMPT verification curl #1: POST /api/qr/create", () => {
     expect(body.expires_at).toBe(future);
   });
 
+  test("expires_at is canonicalised to UTC ISO; POST and GET return same string", async () => {
+    const db = createTestDb();
+    const app = createApp(db);
+    // Input has no millisecond component; without canonicalisation, POST
+    // would echo "...:00Z" while GET (reads Date and toISOString()s) would
+    // return "...:00.000Z". They must agree.
+    const inputIso = "2030-01-01T02:00:00Z";
+    const expectedUtc = new Date(inputIso).toISOString(); // "2030-01-01T02:00:00.000Z"
+    expect(expectedUtc).not.toBe(inputIso); // sanity: drift would exist without fix
+
+    const created = (await (
+      await createQr(app, { url: "https://example.com", expires_at: inputIso })
+    ).json()) as CreateResponse;
+    expect(created.expires_at).toBe(expectedUtc);
+
+    const info = (await (
+      await app.fetch(new Request(`http://localhost/api/qr/${created.token}`))
+    ).json()) as InfoResponse;
+    expect(info.expires_at).toBe(expectedUtc);
+  });
+
   test("rejects invalid URL with 422", async () => {
     const db = createTestDb();
     const app = createApp(db);
@@ -147,6 +168,30 @@ describe("PROMPT verification curl #3: GET /api/qr/:token", () => {
     const app = createApp(db);
     const res = await app.fetch(new Request("http://localhost/api/qr/UNKNOWN0"));
     expect(res.status).toBe(404);
+  });
+});
+
+describe("Cold cache → DB hit warms cache (extra)", () => {
+  test("row inserted directly into DB (cache cold) → /r/:token 302 + warms cache", async () => {
+    const db = createTestDb();
+    const app = createApp(db);
+
+    // Bypass POST so the cache is *not* pre-warmed.
+    await db.insert(urlMappings).values({
+      token: "COLDPATH",
+      originalUrl: "https://cold.example.com/",
+    });
+
+    // First request must hit DB and warm the cache.
+    const first = await app.fetch(new Request("http://localhost/r/COLDPATH"));
+    expect(first.status).toBe(302);
+    expect(first.headers.get("location")).toBe("https://cold.example.com/");
+
+    // Hard-delete the row; if cache was warmed, the next request still 302s.
+    await db.delete(urlMappings).where(eq(urlMappings.token, "COLDPATH"));
+    const second = await app.fetch(new Request("http://localhost/r/COLDPATH"));
+    expect(second.status).toBe(302);
+    expect(second.headers.get("location")).toBe("https://cold.example.com/");
   });
 });
 

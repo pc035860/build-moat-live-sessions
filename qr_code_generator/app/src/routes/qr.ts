@@ -22,6 +22,37 @@ function qrCodeUrl(token: string) {
   return `${BASE_URL}/api/qr/${token}/image`;
 }
 
+function isUniqueViolation(err: unknown): boolean {
+  return err instanceof Error && /UNIQUE constraint failed/i.test(err.message);
+}
+
+/**
+ * `generateToken` checks via SELECT, but two concurrent creators can both
+ * pass that check and race the INSERT. The DB unique constraint catches it
+ * — we just need to retry with a fresh token. One retry is enough; if it
+ * happens twice in a row something else is wrong.
+ *
+ * Exported so unit tests can inject `tokenFactory` to deterministically
+ * exercise the retry path.
+ */
+export async function insertWithFreshToken(
+  db: DB,
+  originalUrl: string,
+  expiresAt: Date | null,
+  tokenFactory: () => Promise<string> = () => generateToken(db),
+): Promise<string> {
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const token = await tokenFactory();
+    try {
+      await db.insert(urlMappings).values({ token, originalUrl, expiresAt });
+      return token;
+    } catch (err) {
+      if (attempt === 1 || !isUniqueViolation(err)) throw err;
+    }
+  }
+  throw new Error("insertWithFreshToken: unreachable");
+}
+
 export function createQrRoutes(db: DB, cache: Cache) {
   const routes = new Hono();
 
@@ -29,22 +60,22 @@ export function createQrRoutes(db: DB, cache: Cache) {
     const { url, expires_at } = c.req.valid("json");
 
     const normalized = validateUrl(url);
-    const token = await generateToken(db);
+    // Canonicalise expires_at once so DB / cache / response all agree on
+    // the same UTC ISO string. Avoids "POST echoes user input but GET
+    // returns toISOString()" drift.
+    const expiresAtDate = expires_at ? new Date(expires_at) : null;
+    const expiresAtIso = expiresAtDate ? expiresAtDate.toISOString() : null;
 
-    await db.insert(urlMappings).values({
-      token,
-      originalUrl: normalized,
-      expiresAt: expires_at ? new Date(expires_at) : null,
-    });
+    const token = await insertWithFreshToken(db, normalized, expiresAtDate);
 
-    cache.set(token, { url: normalized, expiresAt: expires_at ?? null });
+    cache.set(token, { url: normalized, expiresAt: expiresAtIso });
 
     return c.json({
       token,
       short_url: shortUrl(token),
       qr_code_url: qrCodeUrl(token),
       original_url: normalized,
-      expires_at: expires_at ?? null,
+      expires_at: expiresAtIso,
     });
   });
 
